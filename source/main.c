@@ -172,7 +172,7 @@ void *controls_thread() {
     sceKernelExitDeleteThread(0);
 }
 
-void power_callback(int notifyId, int notifyCount, int powerInfo, void *userData) {
+int power_callback(int notifyId, int notifyCount, int powerInfo, void *userData) {
     if ((powerInfo & SCE_POWER_CB_APP_RESUME) == SCE_POWER_CB_APP_RESUME ||
         (powerInfo & SCE_POWER_CB_APP_RESUMING) == SCE_POWER_CB_APP_RESUMING) {
         activity.nativeOnStart(&jni, ACTIVITY_CLASS);
@@ -183,6 +183,7 @@ void power_callback(int notifyId, int notifyCount, int powerInfo, void *userData
         activity.nativeOnPause(&jni, ACTIVITY_CLASS);
         activity.nativeOnStop(&jni, ACTIVITY_CLASS);
     }
+    return 0;
 }
 
 int callback_thread(SceSize args, void *argp) {

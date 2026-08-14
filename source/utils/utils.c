@@ -376,7 +376,7 @@ const char * locale_str() {
 SceUID _vshKernelSearchModuleByName(const char *, int *);
 
 bool module_loaded(const char * name) {
-    int search_unk[2];
+    int search_unk[2] = { 0, 0 };
     return _vshKernelSearchModuleByName(name, search_unk) >= 0;
 }
 

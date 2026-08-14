@@ -17,12 +17,17 @@
 #include "utils/tt_activity.h"
 #include "utils/utils.h"
 
+#include <stdbool.h>
+#include <stdint.h>
 #include <string.h>
 
 #include <psp2/appmgr.h>
 #include <psp2/apputil.h>
+#include <psp2/io/fcntl.h>
 #include <psp2/kernel/clib.h>
 #include <psp2/power.h>
+
+#include <kubridge.h>
 
 #include <falso_jni/FalsoJNI.h>
 #include <so_util/so_util.h>
@@ -58,10 +63,45 @@ void soloader_init_all() {
         l_success("FIOS initialized.");
 #endif
 
-    if (!module_loaded("kubridge")) {
-        l_fatal("kubridge is not loaded.");
-        fatal_error("You need to install kubridge.skprx to play this game. "
-                    "You can download it at https://github.com/bythos14/kubridge/releases");
+    // Diagnose whether the kernel actually resolved our kubridge imports on
+    // this boot. The import stub is rewritten at load time to a
+    // "movw/movt r12, <addr>; bx r12" trampoline; if it still contains the
+    // placeholder (or zeros), kubridge was NOT loaded and the first call into
+    // it would jump into nowhere (prefetch abort at PC 0).
+    const uint32_t *kub_stub = (const uint32_t *) &kuKernelAllocMemBlock;
+    bool kub_resolved = false;
+    for (int i = 0; i < 4; ++i) {
+        if (kub_stub[i] == 0xe12fff1c) { // bx r12
+            kub_resolved = true;
+            break;
+        }
+    }
+
+    const bool kub_found = module_loaded("kubridge");
+
+    SceUID diag_fd = sceIoOpen("ux0:data/lswtcs/boot_diag.txt",
+                               SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777);
+    if (diag_fd >= 0) {
+        char diag[256];
+        int len = sceClibSnprintf(diag, sizeof(diag),
+                                  "module_loaded(kubridge): %d\n"
+                                  "kuKernelAllocMemBlock stub: %08x %08x %08x %08x\n"
+                                  "stub resolved: %d\n",
+                                  kub_found, kub_stub[0], kub_stub[1],
+                                  kub_stub[2], kub_stub[3], kub_resolved);
+        sceIoWrite(diag_fd, diag, len);
+        sceIoClose(diag_fd);
+    }
+
+    if (!kub_resolved && !kub_found) {
+        l_fatal("kubridge imports are unresolved on this boot.");
+        fatal_error("kubridge.skprx is installed but was NOT loaded on this "
+                    "boot. Check that 'Enable Plugins' is on in HENkaku "
+                    "settings and that ur0:tai/config.txt lists kubridge "
+                    "under *KERNEL, then reboot.");
+    } else if (!kub_found) {
+        // Search API can misreport; imports resolving is the real proof.
+        l_warn("kubridge module search failed, but imports resolved fine.");
     }
 
     // Checking for kubridge version
