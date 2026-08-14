@@ -7,6 +7,7 @@
 
 #include "reimpl/keycodes.h"
 
+#include <math.h>
 #include <stdlib.h>
 
 #include <psp2/ctrl.h>
@@ -67,6 +68,51 @@ void controls_init() {
 
 #define BIT_TO_FLOAT(flags, bit) ((flags & bit) == bit ? 1.0f : 0.0f)
 
+// The Vita's sticks sit in a round gate, so pushing fully diagonally puts each
+// axis at only ~0.7 rather than the 1.0 a straight push gives. Scaling the axes
+// independently therefore yields a shorter vector on the diagonals, which the
+// game reads as "not pushed far enough to run". Normalise radially instead: use
+// the vector's length for the deadzone, then rescale it so anything past the
+// saturation point reports full deflection in every direction alike.
+#define ANALOG_DEADZONE   0.18f
+#define ANALOG_SATURATION 0.72f
+
+static void normalize_stick(SceUInt8 raw_x, SceUInt8 raw_y, float *out_x, float *out_y) {
+    float x = ((float) raw_x - 128.0f) / 127.0f;
+    float y = ((float) raw_y - 128.0f) / 127.0f;
+    if (x < -1.0f) x = -1.0f;
+    if (y < -1.0f) y = -1.0f;
+
+    const float mag = sqrtf(x * x + y * y);
+    if (mag <= ANALOG_DEADZONE) {
+        *out_x = 0.0f;
+        *out_y = 0.0f;
+        return;
+    }
+
+    float scale = (mag - ANALOG_DEADZONE) / (ANALOG_SATURATION - ANALOG_DEADZONE);
+    if (scale > 1.0f) {
+        scale = 1.0f;
+    }
+
+    // Unit vector for the direction being pushed.
+    const float ux = x / mag;
+    const float uy = y / mag;
+
+    // NuInputDevicePS::ReadAnalogValuesPS adds the d-pad's +/-1 to each analog
+    // axis and clamps them independently, so the game expects a SQUARE range in
+    // which a full diagonal is (1,1) - exactly what a d-pad diagonal produces.
+    // A round stick gate only reaches (0.7,0.7) there, which reads as a partial
+    // push and makes the character walk. Stretch the circle out to that square
+    // so full travel in any direction means full travel on both axes.
+    const float ax = ux < 0.0f ? -ux : ux;
+    const float ay = uy < 0.0f ? -uy : uy;
+    const float k = 1.0f / (ax > ay ? ax : ay);
+
+    *out_x = ux * k * scale;
+    *out_y = uy * k * scale;
+}
+
 void poll_pad() {
     static uint32_t old_buttons = 0;
     static SceCtrlData pad;
@@ -87,10 +133,9 @@ void poll_pad() {
 
     const float hatX = BIT_TO_FLOAT(pad.buttons, SCE_CTRL_RIGHT) - BIT_TO_FLOAT(pad.buttons, SCE_CTRL_LEFT);
     const float hatY = BIT_TO_FLOAT(pad.buttons, SCE_CTRL_DOWN) - BIT_TO_FLOAT(pad.buttons, SCE_CTRL_UP);
-    const float lX = (float) pad.lx / 255.0f * 2.0f - 1.0f;
-    const float lY = (float) pad.ly / 255.0f * 2.0f - 1.0f;
-    const float rX = (float) pad.rx / 255.0f * 2.0f - 1.0f;
-    const float rY = (float) pad.ry / 255.0f * 2.0f - 1.0f;
+    float lX, lY, rX, rY;
+    normalize_stick(pad.lx, pad.ly, &lX, &lY);
+    normalize_stick(pad.rx, pad.ry, &rX, &rY);
 
     activity.nativeUpdateGamepadAxisValues(&jni, ACTIVITY_CLASS, hatX, hatY, lX, lY, rX, rY);
 
