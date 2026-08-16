@@ -1,3 +1,5 @@
+# THIS IS VIBECODED! REAL DEV NEEDED TO IRON THIS OUT!
+======================================================
 # LEGO Star Wars: TCS (PS Vita) — audio, input and build fixes
 
 Write-up of a debugging session on [gm666q/lswtcs-vita](https://github.com/gm666q/lswtcs-vita).
